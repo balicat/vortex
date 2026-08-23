@@ -80,7 +80,7 @@ impl ScalarFnVTable for IsNotNull {
         _ctx: &mut ExecutionCtx,
     ) -> VortexResult<ArrayRef> {
         let child = args.get(0)?;
-        match child.validity()? {
+        match child.execute_validity(_ctx)? {
             Validity::NonNullable | Validity::AllValid => {
                 Ok(ConstantArray::new(true, args.row_count()).into_array())
             }

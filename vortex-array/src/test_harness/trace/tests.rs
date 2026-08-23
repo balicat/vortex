@@ -132,7 +132,10 @@ impl ArrayEq for StackParentData {
 }
 
 impl ValidityVTable<StackParent> for StackParent {
-    fn validity(_array: ArrayView<'_, StackParent>) -> VortexResult<Validity> {
+    fn validity(
+        _array: ArrayView<'_, StackParent>,
+        _ctx: &mut ExecutionCtx,
+    ) -> VortexResult<Validity> {
         Ok(Validity::NonNullable)
     }
 }
@@ -153,6 +156,7 @@ impl VTable for StackParent {
         dtype: &DType,
         len: usize,
         slots: &[Option<ArrayRef>],
+        _ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         vortex_ensure!(dtype == &test_dtype(), "unexpected stack parent dtype");
         vortex_ensure!(len == 3, "unexpected stack parent length");
@@ -246,7 +250,10 @@ impl ArrayEq for StackChildData {
 }
 
 impl ValidityVTable<StackChild> for StackChild {
-    fn validity(_array: ArrayView<'_, StackChild>) -> VortexResult<Validity> {
+    fn validity(
+        _array: ArrayView<'_, StackChild>,
+        _ctx: &mut ExecutionCtx,
+    ) -> VortexResult<Validity> {
         Ok(Validity::NonNullable)
     }
 }
@@ -267,6 +274,7 @@ impl VTable for StackChild {
         dtype: &DType,
         len: usize,
         slots: &[Option<ArrayRef>],
+        _ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         vortex_ensure!(dtype == &test_dtype(), "unexpected stack child dtype");
         vortex_ensure!(len == 3, "unexpected stack child length");

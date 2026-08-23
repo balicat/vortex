@@ -242,6 +242,7 @@ impl VTable for Sequence {
         dtype: &DType,
         len: usize,
         _slots: &[Option<ArrayRef>],
+        _ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         SequenceData::validate(data.base, data.multiplier, dtype, len)
     }
@@ -361,7 +362,10 @@ impl OperationsVTable<Sequence> for Sequence {
 }
 
 impl ValidityVTable<Sequence> for Sequence {
-    fn validity(_array: ArrayView<'_, Sequence>) -> VortexResult<Validity> {
+    fn validity(
+        _array: ArrayView<'_, Sequence>,
+        _ctx: &mut ExecutionCtx,
+    ) -> VortexResult<Validity> {
         Ok(Validity::AllValid)
     }
 }

@@ -3,6 +3,7 @@
 
 use vortex_error::VortexResult;
 
+use crate::ExecutionCtx;
 use crate::array::ArrayView;
 use crate::array::ValidityVTable;
 use crate::arrays::Union;
@@ -10,7 +11,7 @@ use crate::arrays::union::UnionArraySlotsExt;
 use crate::validity::Validity;
 
 impl ValidityVTable<Union> for Union {
-    fn validity(array: ArrayView<'_, Union>) -> VortexResult<Validity> {
+    fn validity(array: ArrayView<'_, Union>, _ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
         array.type_ids().validity()
     }
 }

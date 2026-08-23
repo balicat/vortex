@@ -8,6 +8,7 @@ use std::ops::Deref;
 use vortex_error::VortexResult;
 
 use crate::ArrayRef;
+use crate::ExecutionCtx;
 use crate::array::Array;
 use crate::array::ArrayId;
 use crate::array::VTable;
@@ -82,6 +83,15 @@ impl<'a, V: VTable> ArrayView<'a, V> {
     }
 
     /// Returns the array's validity representation.
+    ///
+    /// See [`ArrayRef::execute_validity`].
+    pub fn execute_validity(&self, ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
+        self.array.execute_validity(ctx)
+    }
+
+    /// Returns the array's validity representation.
+    /// Prefer [`execute_validity`](Self::execute_validity) with an explicit context; this
+    /// convenience falls back to the hidden global session for encodings that must execute.
     pub fn validity(&self) -> VortexResult<Validity> {
         self.array.validity()
     }

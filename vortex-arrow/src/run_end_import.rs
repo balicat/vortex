@@ -5,17 +5,17 @@ use arrow_array::RunArray;
 use arrow_array::types::RunEndIndexType;
 use vortex_array::ArrayRef;
 use vortex_array::IntoArray;
-use vortex_array::VortexSessionExecute;
 use vortex_array::arrays::PrimitiveArray;
 use vortex_array::arrays::primitive::PrimitiveArrayExt;
 use vortex_array::dtype::NativePType;
-use vortex_array::legacy_session;
+use vortex_array::match_each_unsigned_integer_ptype;
+use vortex_array::search_sorted::SearchResult;
+use vortex_array::search_sorted::SearchSorted;
+use vortex_array::search_sorted::SearchSortedSide;
 use vortex_array::validity::Validity;
 use vortex_buffer::Buffer;
 use vortex_error::VortexResult;
 use vortex_runend::RunEndData;
-use vortex_runend::ops::find_physical_index;
-use vortex_runend::ops::find_slice_end_index;
 
 use crate::FromArrowArray;
 
@@ -23,8 +23,6 @@ impl<R: RunEndIndexType> FromArrowArray<&RunArray<R>> for RunEndData
 where
     R::Native: NativePType,
 {
-    // TODO(ctx): trait fixes - FromArrowArray::from_arrow has a fixed signature.
-    #[allow(clippy::disallowed_methods)]
     fn from_arrow(array: &RunArray<R>, nullable: bool) -> VortexResult<Self> {
         let offset = array.run_ends().offset();
         let len = array.run_ends().len();
@@ -40,13 +38,13 @@ where
             ends.validity()?,
         )
         .into_array();
-        let mut ctx = legacy_session().create_execution_ctx();
-
         let (ends_slice, values_slice) = if offset == 0 && len == array.run_ends().max_value() {
             (ends_array, values)
         } else {
-            let slice_begin = find_physical_index(&ends_array, offset, &mut ctx)?;
-            let slice_end = find_slice_end_index(&ends_array, offset + len, &mut ctx)?;
+            // The run ends were built from an Arrow buffer above, so they are always decoded:
+            // search the primitive slice directly rather than going through an execution context.
+            let slice_begin = physical_index(&ends, offset);
+            let slice_end = slice_end_index(&ends, offset + len);
 
             (
                 ends_array.slice(slice_begin..slice_end)?,
@@ -54,10 +52,42 @@ where
             )
         };
 
+        // The ends are decoded, so validation runs in full without an execution context.
         // SAFETY: arrow-rs enforces the RunEndArray invariants, we inherit their guarantees.
-        RunEndData::validate_parts(&ends_slice, &values_slice, offset, len, &mut ctx)?;
+        RunEndData::validate_parts(&ends_slice, &values_slice, offset, len, None)?;
         Ok(unsafe { RunEndData::new_unchecked(offset) })
     }
+}
+
+/// Find the physical run index containing logical `index` in decoded, unsigned run ends.
+fn physical_index(ends: &PrimitiveArray, index: usize) -> usize {
+    search_run_ends(ends, index).to_ends_index(ends.len())
+}
+
+/// Find the physical offset one past the last run of a slice ending at logical `index`.
+fn slice_end_index(ends: &PrimitiveArray, index: usize) -> usize {
+    match search_run_ends(ends, index) {
+        SearchResult::Found(i) => i,
+        SearchResult::NotFound(i) => {
+            if i == ends.len() {
+                i
+            } else {
+                i + 1
+            }
+        }
+    }
+}
+
+fn search_run_ends(ends: &PrimitiveArray, index: usize) -> SearchResult {
+    match_each_unsigned_integer_ptype!(ends.ptype(), |E| {
+        let Ok(needle) = E::try_from(index) else {
+            // The needle is larger than every value representable in E, so it is past the end.
+            return SearchResult::NotFound(ends.len());
+        };
+        ends.as_slice::<E>()
+            .search_sorted(&needle, SearchSortedSide::Right)
+            .unwrap_or_else(|_| SearchResult::NotFound(ends.len()))
+    })
 }
 
 #[cfg(test)]

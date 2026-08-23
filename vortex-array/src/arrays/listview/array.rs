@@ -16,7 +16,6 @@ use vortex_mask::Mask;
 use crate::ArrayRef;
 use crate::ArraySlots;
 use crate::ExecutionCtx;
-use crate::VortexSessionExecute;
 use crate::aggregate_fn::NumericalAggregateOpts;
 use crate::aggregate_fn::fns::min_max::min_max;
 use crate::array::Array;
@@ -35,7 +34,6 @@ use crate::dtype::DType;
 use crate::dtype::IntegerPType;
 use crate::dtype::PType;
 use crate::expr::stats::Stat;
-use crate::legacy_session;
 use crate::match_each_integer_ptype;
 use crate::match_each_unsigned_integer_ptype;
 use crate::scalar_fn::fns::operators::Operator;
@@ -92,6 +90,7 @@ pub struct ListViewSlots {
 /// # fn main() -> vortex_error::VortexResult<()> {
 /// # use vortex_array::arrays::{ListViewArray, PrimitiveArray};
 /// # use vortex_array::arrays::listview::ListViewArrayExt;
+/// # use vortex_array::{VortexSessionExecute, array_session};
 /// # use vortex_array::validity::Validity;
 /// # use vortex_array::IntoArray;
 /// # use vortex_buffer::buffer;
@@ -114,12 +113,13 @@ pub struct ListViewSlots {
 /// assert_eq!(list_view.len(), 3);
 ///
 /// // Access individual lists
-/// let first_list = list_view.list_elements_at(0)?;
+/// let mut ctx = array_session().create_execution_ctx();
+/// let first_list = list_view.list_elements_at(0, &mut ctx)?;
 /// assert_eq!(first_list.len(), 2);
 /// // First list contains elements[2..4] = [3, 4]
 ///
-/// let first_offset = list_view.offset_at(0);
-/// let first_size = list_view.size_at(0);
+/// let first_offset = list_view.offset_at(0, &mut ctx);
+/// let first_size = list_view.size_at(0, &mut ctx);
 /// assert_eq!(first_offset, 2);
 /// assert_eq!(first_size, 2);
 /// # Ok(())
@@ -225,11 +225,17 @@ impl ListViewData {
     }
 
     /// Validates the components that would be used to create a `ListViewArray`.
+    ///
+    /// With `ctx`, encoded offsets/sizes are fully validated (see [`VTable::validate`] for the
+    /// contract); without one, they are validated only when they are already decoded.
+    ///
+    /// [`VTable::validate`]: crate::vtable::VTable::validate
     pub fn validate(
         elements: &ArrayRef,
         offsets: &ArrayRef,
         sizes: &ArrayRef,
         validity: &Validity,
+        ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         // Check that offsets and sizes are integer arrays and non-nullable.
         vortex_ensure!(
@@ -260,13 +266,22 @@ impl ListViewData {
             );
         }
 
-        // Skip host-only validation when offsets/sizes are not host-resident.
-        if offsets.is_host() && sizes.is_host() {
-            // TODO(ctx): trait fixes - VTable::validate has a fixed signature.
-            #[allow(clippy::disallowed_methods)]
-            let mut ctx = legacy_session().create_execution_ctx();
-            let offsets_primitive = offsets.clone().execute::<PrimitiveArray>(&mut ctx)?;
-            let sizes_primitive = sizes.clone().execute::<PrimitiveArray>(&mut ctx)?;
+        // Skip host-only validation when offsets/sizes are not host-resident. Without a ctx,
+        // validate only components that are already decoded.
+        let decoded = if !(offsets.is_host() && sizes.is_host()) {
+            None
+        } else if let Some(ctx) = ctx {
+            Some((
+                offsets.clone().execute::<PrimitiveArray>(ctx)?,
+                sizes.clone().execute::<PrimitiveArray>(ctx)?,
+            ))
+        } else {
+            offsets
+                .as_opt::<Primitive>()
+                .zip(sizes.as_opt::<Primitive>())
+                .map(|(o, s)| (o.into_owned(), s.into_owned()))
+        };
+        if let Some((offsets_primitive, sizes_primitive)) = decoded {
             // Offsets and sizes are non-negative; reinterpret to unsigned to dispatch over 4 widths
             // each (4x4 instead of 8x8). This is a read-only validation, so result types are moot.
             let offsets_primitive =
@@ -568,7 +583,7 @@ impl Array<ListView> {
         let dtype = DType::List(Arc::new(elements.dtype().clone()), validity.nullability());
         let len = offsets.len();
         let slots = ListViewData::make_slots(&elements, &offsets, &sizes, &validity, len);
-        ListViewData::validate(&elements, &offsets, &sizes, &validity)
+        ListViewData::validate(&elements, &offsets, &sizes, &validity, None)
             .vortex_expect("`ListViewArray` construction failed");
         let data = ListViewData::new();
         unsafe {
@@ -588,7 +603,7 @@ impl Array<ListView> {
         let dtype = DType::List(Arc::new(elements.dtype().clone()), validity.nullability());
         let len = offsets.len();
         let slots = ListViewData::make_slots(&elements, &offsets, &sizes, &validity, len);
-        ListViewData::validate(&elements, &offsets, &sizes, &validity)?;
+        ListViewData::validate(&elements, &offsets, &sizes, &validity, None)?;
         let data = ListViewData::try_new()?;
         Ok(unsafe {
             Array::from_parts_unchecked(

@@ -431,6 +431,7 @@ impl VTable for OnPair {
         dtype: &DType,
         len: usize,
         slots: &[Option<ArrayRef>],
+        _ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         let s = OnPairSlotsView::from_slots(slots);
         validate_parts(
@@ -663,7 +664,7 @@ where
 }
 
 impl ValidityVTable<OnPair> for OnPair {
-    fn validity(array: ArrayView<'_, OnPair>) -> VortexResult<Validity> {
+    fn validity(array: ArrayView<'_, OnPair>, _ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
         Ok(child_to_validity(
             array.slots()[OnPairSlots::VALIDITY].as_ref(),
             array.dtype().nullability(),

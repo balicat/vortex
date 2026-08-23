@@ -297,6 +297,7 @@ impl VTable for Interleave {
         dtype: &DType,
         len: usize,
         slots: &[Option<ArrayRef>],
+        _ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         vortex_ensure!(
             slots.len() == data.num_values + 2,
@@ -420,7 +421,10 @@ impl OperationsVTable<Interleave> for Interleave {
 }
 
 impl ValidityVTable<Interleave> for Interleave {
-    fn validity(array: ArrayView<'_, Interleave>) -> VortexResult<Validity> {
+    fn validity(
+        array: ArrayView<'_, Interleave>,
+        _ctx: &mut ExecutionCtx,
+    ) -> VortexResult<Validity> {
         if !array.as_ref().dtype().is_nullable() {
             return Ok(Validity::NonNullable);
         }

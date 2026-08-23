@@ -70,7 +70,7 @@ impl ScalarFnVTable for IsNull {
             return Ok(ConstantArray::new(scalar.is_null(), args.row_count()).into_array());
         }
 
-        match child.validity()? {
+        match child.execute_validity(_ctx)? {
             Validity::NonNullable | Validity::AllValid => {
                 Ok(ConstantArray::new(false, args.row_count()).into_array())
             }

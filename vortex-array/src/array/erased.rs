@@ -283,7 +283,7 @@ impl ArrayRef {
     /// Returns whether the item at `index` is valid.
     pub fn is_valid(&self, index: usize, ctx: &mut ExecutionCtx) -> VortexResult<bool> {
         vortex_ensure!(index < self.len(), OutOfBounds: index, 0, self.len());
-        match self.validity()? {
+        match self.execute_validity(ctx)? {
             Validity::NonNullable | Validity::AllValid => Ok(true),
             Validity::AllInvalid => Ok(false),
             Validity::Array(a) => a
@@ -301,7 +301,7 @@ impl ArrayRef {
 
     /// Returns whether all items in the array are valid.
     pub fn all_valid(&self, ctx: &mut ExecutionCtx) -> VortexResult<bool> {
-        match self.validity()? {
+        match self.execute_validity(ctx)? {
             Validity::NonNullable | Validity::AllValid => Ok(true),
             Validity::AllInvalid => Ok(false),
             Validity::Array(a) => Ok(a.statistics().compute_min::<bool>(ctx).unwrap_or(false)),
@@ -310,7 +310,7 @@ impl ArrayRef {
 
     /// Returns whether the array is all invalid.
     pub fn all_invalid(&self, ctx: &mut ExecutionCtx) -> VortexResult<bool> {
-        match self.validity()? {
+        match self.execute_validity(ctx)? {
             Validity::NonNullable | Validity::AllValid => Ok(false),
             Validity::AllInvalid => Ok(true),
             Validity::Array(a) => Ok(!a.statistics().compute_max::<bool>(ctx).unwrap_or(true)),
@@ -325,7 +325,7 @@ impl ArrayRef {
             return Ok(len - invalid_count);
         }
 
-        let count = match self.validity()? {
+        let count = match self.execute_validity(ctx)? {
             Validity::NonNullable | Validity::AllValid => len,
             Validity::AllInvalid => 0,
             Validity::Array(a) => {
@@ -350,8 +350,19 @@ impl ArrayRef {
     }
 
     /// Returns the [`Validity`] of the array.
+    ///
+    /// Most encodings answer from metadata, but some (e.g. lazy expression arrays) must execute
+    /// to derive their validity, which is why an execution context is required.
+    pub fn execute_validity(&self, ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
+        self.0.data.validity(self, ctx)
+    }
+
+    /// Returns the [`Validity`] of the array.
+    /// Prefer [`execute_validity`](Self::execute_validity) with an explicit context; this
+    /// convenience falls back to the hidden global session for encodings that must execute.
+    #[allow(clippy::disallowed_methods)]
     pub fn validity(&self) -> VortexResult<Validity> {
-        self.0.data.validity(self)
+        self.execute_validity(&mut legacy_session().create_execution_ctx())
     }
 
     /// Returns the canonical representation of the array.

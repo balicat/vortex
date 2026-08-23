@@ -11,24 +11,26 @@ use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
 use vortex_error::vortex_ensure;
 use vortex_error::vortex_err;
+use vortex_mask::Mask;
 
 use crate::ArrayRef;
 use crate::ArraySlots;
 use crate::ExecutionCtx;
-use crate::VortexSessionExecute;
 use crate::array::Array;
 use crate::array::ArrayParts;
 use crate::array::TypedArrayRef;
 use crate::array::child_to_validity;
 use crate::array::validity_to_child;
 use crate::array_slots;
+use crate::arrays::Bool;
+use crate::arrays::Primitive;
 use crate::arrays::VarBin;
+use crate::arrays::bool::BoolArrayExt;
 use crate::arrays::varbin::builder::VarBinBuilder;
 use crate::buffer::BufferHandle;
 use crate::dtype::DType;
 use crate::dtype::Nullability;
 use crate::dtype::OffsetBuilderPType;
-use crate::legacy_session;
 use crate::match_each_integer_ptype;
 use crate::validity::Validity;
 
@@ -68,7 +70,7 @@ impl VarBinData {
     /// Panics if the provided components do not satisfy the invariants documented
     /// in `VarBinArray::new_unchecked`.
     pub fn build(offsets: ArrayRef, bytes: ByteBuffer, dtype: DType, validity: Validity) -> Self {
-        Self::try_build(offsets, bytes, dtype, validity).vortex_expect("VarBinArray new")
+        Self::try_build(offsets, bytes, dtype, validity, None).vortex_expect("VarBinArray new")
     }
 
     /// Creates a new `VarBinArray`.
@@ -107,9 +109,10 @@ impl VarBinData {
         bytes: ByteBuffer,
         dtype: DType,
         validity: Validity,
+        ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<Self> {
         let bytes = BufferHandle::new_host(bytes);
-        Self::validate(&offsets, &bytes, &dtype, &validity)?;
+        Self::validate(&offsets, &bytes, &dtype, &validity, ctx)?;
 
         // SAFETY: validate ensures all invariants are met.
         Ok(unsafe { Self::new_unchecked_from_handle(bytes) })
@@ -130,7 +133,7 @@ impl VarBinData {
         dtype: DType,
         validity: Validity,
     ) -> VortexResult<Self> {
-        Self::validate(&offsets, &bytes, &dtype, &validity)?;
+        Self::validate(&offsets, &bytes, &dtype, &validity, None)?;
 
         // SAFETY: validate ensures all invariants are met.
         Ok(unsafe { Self::new_unchecked_from_handle(bytes) })
@@ -183,11 +186,15 @@ impl VarBinData {
     /// Validates the components that would be used to create a `VarBinArray`.
     ///
     /// This function checks all the invariants required by `VarBinArray::new_unchecked`.
+    /// With `ctx`, encoded offsets and array-backed validity are fully validated (see
+    /// [`VTable::validate`](crate::vtable::VTable::validate) for the contract); without one, the
+    /// UTF-8 check runs only when those components are already decoded.
     pub fn validate(
         offsets: &ArrayRef,
         bytes: &BufferHandle,
         dtype: &DType,
         validity: &Validity,
+        ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         // Check offsets are non-nullable integer
         vortex_ensure!(
@@ -231,15 +238,19 @@ impl VarBinData {
             && matches!(dtype, DType::Utf8(_))
             && let Some(bytes) = bytes.as_host_opt()
         {
-            Self::validate_utf8(offsets, bytes.as_ref(), validity)?;
+            Self::validate_utf8(offsets, bytes.as_ref(), validity, ctx)?;
         }
 
         Ok(())
     }
 
     /// Validates that every non-null value is valid UTF-8.
-    #[allow(clippy::disallowed_methods)]
-    fn validate_utf8(offsets: &ArrayRef, bytes: &[u8], validity: &Validity) -> VortexResult<()> {
+    fn validate_utf8(
+        offsets: &ArrayRef,
+        bytes: &[u8],
+        validity: &Validity,
+        mut ctx: Option<&mut ExecutionCtx>,
+    ) -> VortexResult<()> {
         let validate_at = |i: usize, start: usize, end: usize| -> VortexResult<()> {
             let string_bytes = &bytes[start..end];
             simdutf8::basic::from_utf8(string_bytes).map_err(|_| {
@@ -251,18 +262,30 @@ impl VarBinData {
             Ok(())
         };
 
-        // TODO(ctx): trait fixes - VTable::validate has a fixed signature.
-        let mut ctx = legacy_session().create_execution_ctx();
         // TODO(joe): update the created VarBin with this decompressed Array.
-        let primitive_offsets = offsets.clone().execute::<PrimitiveArray>(&mut ctx)?;
+        let Some(primitive_offsets) = (match ctx.as_deref_mut() {
+            Some(ctx) => Some(offsets.clone().execute::<PrimitiveArray>(ctx)?),
+            None => offsets.as_opt::<Primitive>().map(|o| o.into_owned()),
+        }) else {
+            // Without an execution context, encoded offsets cannot be decoded for validation.
+            return Ok(());
+        };
 
         // Array-backed validity is the only variant that needs an execution context: execute it into
-        // a mask once. The constant variants resolve null-ness without one. Resolving this before
-        // the per-type dispatch keeps the dtype loop simple.
+        // a mask once (or read it directly when the validity child is already a decoded bool array).
+        // The constant variants resolve null-ness without one. Resolving this before the per-type
+        // dispatch keeps the dtype loop simple.
         let mask = match validity {
-            Validity::Array(_) => {
-                Some(validity.execute_mask(primitive_offsets.len().saturating_sub(1), &mut ctx)?)
-            }
+            Validity::Array(validity_array) => match ctx {
+                Some(ctx) => {
+                    Some(validity.execute_mask(primitive_offsets.len().saturating_sub(1), ctx)?)
+                }
+                None => match validity_array.as_opt::<Bool>() {
+                    Some(bool_array) => Some(Mask::from(bool_array.to_bit_buffer())),
+                    // Without an execution context, encoded validity cannot be decoded.
+                    None => return Ok(()),
+                },
+            },
             _ => None,
         };
         let all_invalid = validity.definitely_all_null();
@@ -515,7 +538,7 @@ impl Array<VarBin> {
     ) -> VortexResult<Self> {
         let len = offsets.len() - 1;
         let bytes = BufferHandle::new_host(bytes);
-        VarBinData::validate(&offsets, &bytes, &dtype, &validity)?;
+        VarBinData::validate(&offsets, &bytes, &dtype, &validity, None)?;
         let slots = VarBinData::make_slots(offsets, &validity, len);
         // SAFETY: validate ensures all invariants are met.
         let data = unsafe { VarBinData::new_unchecked_from_handle(bytes) };

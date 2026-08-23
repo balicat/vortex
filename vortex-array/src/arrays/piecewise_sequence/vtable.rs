@@ -60,6 +60,7 @@ impl VTable for PiecewiseSequence {
         dtype: &DType,
         _len: usize,
         slots: &[Option<ArrayRef>],
+        _ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         vortex_ensure!(
             dtype == &DType::from(PType::U64),
@@ -164,7 +165,10 @@ impl OperationsVTable<PiecewiseSequence> for PiecewiseSequence {
 }
 
 impl ValidityVTable<PiecewiseSequence> for PiecewiseSequence {
-    fn validity(_array: ArrayView<'_, PiecewiseSequence>) -> VortexResult<Validity> {
+    fn validity(
+        _array: ArrayView<'_, PiecewiseSequence>,
+        _ctx: &mut ExecutionCtx,
+    ) -> VortexResult<Validity> {
         Ok(Validity::NonNullable)
     }
 }

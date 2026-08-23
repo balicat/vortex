@@ -199,6 +199,7 @@ impl VTable for Sparse {
         dtype: &DType,
         len: usize,
         slots: &[Option<ArrayRef>],
+        _ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         let patches = SparseData::patches_from_slots(data, len, slots);
         SparseData::validate(&patches, data.fill_scalar(), dtype, len)
@@ -668,7 +669,7 @@ impl SparseExt for Array<Sparse> {
 }
 
 impl ValidityVTable<Sparse> for Sparse {
-    fn validity(array: ArrayView<'_, Sparse>) -> VortexResult<Validity> {
+    fn validity(array: ArrayView<'_, Sparse>, _ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
         let orig_patches = array.patches();
         let validity_patches = unsafe {
             Patches::new_unchecked(

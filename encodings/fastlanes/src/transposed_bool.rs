@@ -143,6 +143,7 @@ impl VTable for TransposedBool {
         dtype: &DType,
         len: usize,
         slots: &[Option<ArrayRef>],
+        _ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         vortex_ensure!(
             dtype == &DType::Bool(Nullability::NonNullable),
@@ -268,7 +269,10 @@ impl OperationsVTable<TransposedBool> for TransposedBool {
 }
 
 impl ValidityVTable<TransposedBool> for TransposedBool {
-    fn validity(_array: ArrayView<'_, TransposedBool>) -> VortexResult<Validity> {
+    fn validity(
+        _array: ArrayView<'_, TransposedBool>,
+        _ctx: &mut ExecutionCtx,
+    ) -> VortexResult<Validity> {
         Ok(Validity::NonNullable)
     }
 }

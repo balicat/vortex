@@ -75,6 +75,7 @@ impl VTable for Slice {
         dtype: &DType,
         len: usize,
         slots: &[Option<ArrayRef>],
+        _ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         vortex_ensure!(
             slots[SliceSlots::CHILD].is_some(),
@@ -179,7 +180,7 @@ impl OperationsVTable<Slice> for Slice {
 }
 
 impl ValidityVTable<Slice> for Slice {
-    fn validity(array: ArrayView<'_, Slice>) -> VortexResult<Validity> {
+    fn validity(array: ArrayView<'_, Slice>, _ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
         array.child().validity()?.slice(array.range.clone())
     }
 }

@@ -123,7 +123,7 @@ pub(crate) trait DynArrayData: 'static + private::Sealed + Send + Sync + Debug {
     fn as_any_mut(&mut self) -> &mut dyn Any;
 
     /// Returns the [`Validity`] of the array.
-    fn validity(&self, this: &ArrayRef) -> VortexResult<Validity>;
+    fn validity(&self, this: &ArrayRef, ctx: &mut ExecutionCtx) -> VortexResult<Validity>;
 
     /// Writes the array into the canonical builder.
     ///
@@ -262,10 +262,10 @@ impl<V: VTable> DynArrayData for ArrayData<V> {
         self
     }
 
-    fn validity(&self, this: &ArrayRef) -> VortexResult<Validity> {
+    fn validity(&self, this: &ArrayRef, ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
         if this.dtype().is_nullable() {
             let view = unsafe { ArrayView::new_unchecked(this, &self.data) };
-            let validity = <V::ValidityVTable as ValidityVTable<V>>::validity(view)?;
+            let validity = <V::ValidityVTable as ValidityVTable<V>>::validity(view, ctx)?;
             if let Validity::Array(array) = &validity {
                 vortex_ensure!(array.len() == this.len(), "Validity array length mismatch");
                 vortex_ensure!(

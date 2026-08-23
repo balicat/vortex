@@ -139,6 +139,7 @@ impl VTable for Pco {
         dtype: &DType,
         len: usize,
         slots: &[Option<ArrayRef>],
+        _ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         let validity = child_to_validity(
             PcoSlotsView::from_slots(slots).validity,
@@ -699,7 +700,7 @@ impl PcoData {
 }
 
 impl ValidityVTable<Pco> for Pco {
-    fn validity(array: ArrayView<'_, Pco>) -> VortexResult<Validity> {
+    fn validity(array: ArrayView<'_, Pco>, _ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
         array
             .unsliced_validity()
             .slice(array.slice_start()..array.slice_stop())

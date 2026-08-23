@@ -111,6 +111,7 @@ impl VTable for FixedSizeList {
         dtype: &DType,
         len: usize,
         slots: &[Option<ArrayRef>],
+        _ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         vortex_ensure!(
             slots.len() == FixedSizeListSlots::COUNT,

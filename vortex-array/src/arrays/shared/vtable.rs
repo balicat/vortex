@@ -65,6 +65,7 @@ impl VTable for Shared {
         dtype: &DType,
         len: usize,
         slots: &[Option<ArrayRef>],
+        _ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         let source = slots[SharedSlots::SOURCE]
             .as_ref()
@@ -135,7 +136,7 @@ impl OperationsVTable<Shared> for Shared {
 }
 
 impl ValidityVTable<Shared> for Shared {
-    fn validity(array: ArrayView<'_, Shared>) -> VortexResult<Validity> {
+    fn validity(array: ArrayView<'_, Shared>, _ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
         array.current_array_ref().validity()
     }
 }

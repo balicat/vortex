@@ -7,7 +7,6 @@ use vortex_error::vortex_bail;
 use crate::ArrayRef;
 use crate::ExecutionCtx;
 use crate::IntoArray;
-use crate::VortexSessionExecute;
 use crate::array::ArrayView;
 use crate::array::ValidityVTable;
 use crate::arrays::ConstantArray;
@@ -17,7 +16,6 @@ use crate::arrays::scalar_fn::vtable::FakeEq;
 use crate::arrays::scalar_fn::vtable::ScalarFn;
 use crate::expr::Expression;
 use crate::expr::lit;
-use crate::legacy_session;
 use crate::scalar_fn::TypedScalarFnInstance;
 use crate::scalar_fn::VecExecutionArgs;
 use crate::scalar_fn::fns::literal::Literal;
@@ -56,7 +54,7 @@ fn execute_expr(
 }
 
 impl ValidityVTable<ScalarFn> for ScalarFn {
-    fn validity(array: ArrayView<'_, ScalarFn>) -> VortexResult<Validity> {
+    fn validity(array: ArrayView<'_, ScalarFn>, ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
         let inputs: Vec<_> = array
             .iter_children()
             .map(|child| {
@@ -73,9 +71,6 @@ impl ValidityVTable<ScalarFn> for ScalarFn {
         let expr = Expression::try_new(array.scalar_fn().clone(), inputs)?;
         let validity_expr = array.scalar_fn().validity(&expr)?;
 
-        // TODO(ctx): trait fixes - ValidityVTable::validity has a fixed signature.
-        #[allow(clippy::disallowed_methods)]
-        let ctx = &mut legacy_session().create_execution_ctx();
         // Execute the validity expression. All leaves are ArrayExpr nodes.
         Ok(Validity::Array(execute_expr(
             &validity_expr,

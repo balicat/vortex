@@ -4,6 +4,7 @@
 use vortex_error::VortexResult;
 
 use super::Dict;
+use crate::ExecutionCtx;
 use crate::IntoArray;
 use crate::array::ArrayView;
 use crate::array::ValidityVTable;
@@ -15,7 +16,7 @@ use crate::scalar::Scalar;
 use crate::validity::Validity;
 
 impl ValidityVTable<Dict> for Dict {
-    fn validity(array: ArrayView<'_, Dict>) -> VortexResult<Validity> {
+    fn validity(array: ArrayView<'_, Dict>, _ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
         Ok(
             match (array.codes().validity()?, array.values().validity()?) {
                 (

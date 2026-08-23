@@ -84,7 +84,10 @@ impl ForeignArray {
 pub struct ForeignValidityVTable;
 
 impl ValidityVTable<ForeignArray> for ForeignValidityVTable {
-    fn validity(array: ArrayView<'_, ForeignArray>) -> VortexResult<Validity> {
+    fn validity(
+        array: ArrayView<'_, ForeignArray>,
+        _ctx: &mut ExecutionCtx,
+    ) -> VortexResult<Validity> {
         Ok(Validity::from(array.dtype().nullability()))
     }
 }
@@ -104,6 +107,7 @@ impl VTable for ForeignArray {
         _dtype: &DType,
         _len: usize,
         _slots: &[Option<ArrayRef>],
+        _ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         Ok(())
     }

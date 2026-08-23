@@ -3,6 +3,7 @@
 
 use vortex_error::VortexResult;
 
+use crate::ExecutionCtx;
 use crate::array::ArrayView;
 use crate::array::ValidityVTable;
 use crate::arrays::varbin::VarBinArrayExt;
@@ -10,7 +11,7 @@ use crate::arrays::varbin::vtable::VarBin;
 use crate::validity::Validity;
 
 impl ValidityVTable<VarBin> for VarBin {
-    fn validity(array: ArrayView<'_, VarBin>) -> VortexResult<Validity> {
+    fn validity(array: ArrayView<'_, VarBin>, _ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
         Ok(array.varbin_validity())
     }
 }

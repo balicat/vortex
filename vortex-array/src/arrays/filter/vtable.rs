@@ -77,6 +77,7 @@ impl VTable for Filter {
         dtype: &DType,
         len: usize,
         slots: &[Option<ArrayRef>],
+        _ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         vortex_ensure!(
             slots[FilterSlots::CHILD].is_some(),
@@ -195,7 +196,7 @@ impl OperationsVTable<Filter> for Filter {
 }
 
 impl ValidityVTable<Filter> for Filter {
-    fn validity(array: ArrayView<'_, Filter>) -> VortexResult<Validity> {
+    fn validity(array: ArrayView<'_, Filter>, _ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
         array.child().validity()?.filter(&array.mask)
     }
 }

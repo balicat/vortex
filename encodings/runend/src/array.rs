@@ -7,6 +7,7 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::hash::Hasher;
 
+use num_traits::ToPrimitive;
 use prost::Message;
 use vortex_array::Array;
 use vortex_array::ArrayEq;
@@ -20,7 +21,6 @@ use vortex_array::ExecutionCtx;
 use vortex_array::ExecutionResult;
 use vortex_array::IntoArray;
 use vortex_array::TypedArrayRef;
-use vortex_array::VortexSessionExecute;
 use vortex_array::array_slots;
 use vortex_array::arrays::Primitive;
 use vortex_array::arrays::VarBinViewArray;
@@ -28,7 +28,7 @@ use vortex_array::buffer::BufferHandle;
 use vortex_array::dtype::DType;
 use vortex_array::dtype::Nullability;
 use vortex_array::dtype::PType;
-use vortex_array::legacy_session;
+use vortex_array::match_each_unsigned_integer_ptype;
 use vortex_array::serde::ArrayChildren;
 use vortex_array::validity::Validity;
 use vortex_array::vtable::VTable;
@@ -37,6 +37,7 @@ use vortex_error::VortexExpect as _;
 use vortex_error::VortexResult;
 use vortex_error::vortex_bail;
 use vortex_error::vortex_ensure;
+use vortex_error::vortex_err;
 use vortex_error::vortex_panic;
 use vortex_session::VortexSession;
 use vortex_session::registry::CachedId;
@@ -85,20 +86,18 @@ impl VTable for RunEnd {
         *ID
     }
 
-    #[allow(clippy::disallowed_methods)]
     fn validate(
         &self,
         data: &Self::TypedArrayData,
         dtype: &DType,
         len: usize,
         slots: &[Option<ArrayRef>],
+        ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         let run_end_slots = RunEndSlotsView::from_slots(slots);
         let ends = run_end_slots.ends;
         let values = run_end_slots.values;
-        // TODO(ctx): trait fixes - VTable::validate has a fixed signature.
-        let mut ctx = legacy_session().create_execution_ctx();
-        RunEndData::validate_parts(ends, values, data.offset, len, &mut ctx)?;
+        RunEndData::validate_parts(ends, values, data.offset, len, ctx)?;
         vortex_ensure!(
             values.dtype() == dtype,
             "expected dtype {}, got {}",
@@ -259,7 +258,7 @@ impl RunEnd {
         ctx: &mut ExecutionCtx,
     ) -> VortexResult<RunEndArray> {
         let len = RunEndData::logical_len_from_ends(&ends, ctx)?;
-        RunEndData::validate_parts(&ends, &values, 0, len, ctx)?;
+        RunEndData::validate_parts(&ends, &values, 0, len, Some(ctx))?;
         let dtype = values.dtype().clone();
         let slots = RunEndSlots { ends, values }.into_slots();
         let data = RunEndData::new(0);
@@ -274,7 +273,7 @@ impl RunEnd {
         length: usize,
         ctx: &mut ExecutionCtx,
     ) -> VortexResult<RunEndArray> {
-        RunEndData::validate_parts(&ends, &values, offset, length, ctx)?;
+        RunEndData::validate_parts(&ends, &values, offset, length, Some(ctx))?;
         let dtype = values.dtype().clone();
         let slots = RunEndSlots { ends, values }.into_slots();
         let data = RunEndData::new(offset);
@@ -313,12 +312,15 @@ impl RunEndData {
 
     /// Validate that `ends` and `values` form a well-formed run-end array covering
     /// `offset..offset + length`.
+    /// With `ctx`, encoded run ends are fully validated (see
+    /// [`VTable::validate`](vortex_array::vtable::VTable::validate) for the contract); without
+    /// one, they are validated only when they are already decoded.
     pub fn validate_parts(
         ends: &ArrayRef,
         values: &ArrayRef,
         offset: usize,
         length: usize,
-        ctx: &mut ExecutionCtx,
+        mut ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         // DType validation
         vortex_ensure!(
@@ -348,7 +350,7 @@ impl RunEndData {
         }
 
         #[cfg(debug_assertions)]
-        {
+        if let Some(ctx) = ctx.as_deref_mut() {
             // Run ends must be strictly sorted for binary search to work correctly.
             let pre_validation = ends.statistics().to_owned();
 
@@ -361,22 +363,48 @@ impl RunEndData {
             // We don't want to run with different stats in debug mode and outside.
             ends.statistics().inherit(pre_validation.iter());
             debug_assert!(is_sorted);
+        } else if let Some(ends_primitive) = ends.as_opt::<Primitive>() {
+            match_each_unsigned_integer_ptype!(ends_primitive.ptype(), |E| {
+                debug_assert!(
+                    ends_primitive.as_slice::<E>().is_sorted_by(|a, b| a < b),
+                    "Run ends must be strictly sorted"
+                );
+            });
         }
 
-        // Skip host-only validation when ends are not host-resident.
+        // Skip host-only validation when ends are not host-resident. Without an execution
+        // context, encoded ends cannot be decoded: validate only decoded ends.
         if !ends.is_host() {
             return Ok(());
         }
+        let (first_run_end, last_run_end) = match ctx {
+            Some(ctx) => (
+                usize::try_from(&ends.execute_scalar(0, ctx)?)?,
+                usize::try_from(&ends.execute_scalar(ends.len() - 1, ctx)?)?,
+            ),
+            None => match ends.as_opt::<Primitive>() {
+                Some(ends_primitive) => {
+                    match_each_unsigned_integer_ptype!(ends_primitive.ptype(), |E| {
+                        let slice = ends_primitive.as_slice::<E>();
+                        (
+                            slice[0]
+                                .to_usize()
+                                .ok_or_else(|| vortex_err!("run end does not fit in usize"))?,
+                            slice[slice.len() - 1]
+                                .to_usize()
+                                .ok_or_else(|| vortex_err!("run end does not fit in usize"))?,
+                        )
+                    })
+                }
+                None => return Ok(()),
+            },
+        };
 
         // Validate the offset and length are valid for the given ends and values
-        if offset != 0 && length != 0 {
-            let first_run_end = usize::try_from(&ends.execute_scalar(0, ctx)?)?;
-            if first_run_end < offset {
-                vortex_bail!("First run end {first_run_end} must be >= offset {offset}");
-            }
+        if offset != 0 && length != 0 && first_run_end < offset {
+            vortex_bail!("First run end {first_run_end} must be >= offset {offset}");
         }
 
-        let last_run_end = usize::try_from(&ends.execute_scalar(ends.len() - 1, ctx)?)?;
         let min_required_end = offset + length;
         if last_run_end < min_required_end {
             vortex_bail!("Last run end {last_run_end} must be >= offset+length {min_required_end}");
@@ -454,7 +482,7 @@ impl RunEndData {
 }
 
 impl ValidityVTable<RunEnd> for RunEnd {
-    fn validity(array: ArrayView<'_, RunEnd>) -> VortexResult<Validity> {
+    fn validity(array: ArrayView<'_, RunEnd>, _ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
         Ok(match array.values().validity()? {
             Validity::NonNullable | Validity::AllValid => Validity::AllValid,
             Validity::AllInvalid => Validity::AllInvalid,

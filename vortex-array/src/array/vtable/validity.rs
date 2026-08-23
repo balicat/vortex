@@ -4,6 +4,7 @@
 use vortex_error::VortexResult;
 
 use crate::ArrayRef;
+use crate::ExecutionCtx;
 use crate::array::ArrayView;
 use crate::array::VTable;
 use crate::validity::Validity;
@@ -24,7 +25,7 @@ pub trait ValidityVTable<V: VTable> {
     ///
     /// If this returns [`Validity::Array`], the child array must have the same length as `array`
     /// and non-nullable boolean dtype.
-    fn validity(array: ArrayView<'_, V>) -> VortexResult<Validity>;
+    fn validity(array: ArrayView<'_, V>, ctx: &mut ExecutionCtx) -> VortexResult<Validity>;
 }
 
 /// An implementation of the [`ValidityVTable`] for arrays that delegate validity entirely
@@ -41,8 +42,8 @@ impl<V: VTable> ValidityVTable<V> for ValidityVTableFromChild
 where
     V: ValidityChild<V>,
 {
-    fn validity(array: ArrayView<'_, V>) -> VortexResult<Validity> {
-        V::validity_child(array).validity()
+    fn validity(array: ArrayView<'_, V>, ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
+        V::validity_child(array).execute_validity(ctx)
     }
 }
 
@@ -66,7 +67,7 @@ impl<V: VTable> ValidityVTable<V> for ValidityVTableFromChildSliceHelper
 where
     V::TypedArrayData: ValidityChildSliceHelper,
 {
-    fn validity(array: ArrayView<'_, V>) -> VortexResult<Validity> {
-        array.data().sliced_child_array()?.validity()
+    fn validity(array: ArrayView<'_, V>, ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
+        array.data().sliced_child_array()?.execute_validity(ctx)
     }
 }

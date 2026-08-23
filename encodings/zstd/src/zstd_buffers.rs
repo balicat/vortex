@@ -536,18 +536,17 @@ impl OperationsVTable<ZstdBuffers> for ZstdBuffers {
 }
 
 impl ValidityVTable<ZstdBuffers> for ZstdBuffers {
-    #[allow(clippy::disallowed_methods)]
-    fn validity(array: ArrayView<'_, ZstdBuffers>) -> VortexResult<Validity> {
+    fn validity(
+        array: ArrayView<'_, ZstdBuffers>,
+        ctx: &mut ExecutionCtx,
+    ) -> VortexResult<Validity> {
         if !array.dtype().is_nullable() {
             return Ok(Validity::NonNullable);
         }
 
-        // TODO(ctx): trait fixes - ValidityVTable::validity has a fixed signature.
-        let inner_array = ZstdBuffers::decompress_and_build_inner(
-            &array.into_owned(),
-            vortex_array::legacy_session(),
-        )?;
-        inner_array.validity()
+        let session = ctx.session().clone();
+        let inner_array = ZstdBuffers::decompress_and_build_inner(&array.into_owned(), &session)?;
+        inner_array.execute_validity(ctx)
     }
 }
 

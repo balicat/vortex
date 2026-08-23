@@ -51,6 +51,7 @@ impl VTable for Null {
         dtype: &DType,
         _len: usize,
         _slots: &[Option<ArrayRef>],
+        _ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         vortex_ensure!(*dtype == DType::Null, "NullArray dtype must be DType::Null");
         Ok(())
@@ -185,7 +186,7 @@ impl OperationsVTable<Null> for Null {
 }
 
 impl ValidityVTable<Null> for Null {
-    fn validity(_array: ArrayView<'_, Null>) -> VortexResult<Validity> {
+    fn validity(_array: ArrayView<'_, Null>, _ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
         Ok(Validity::AllInvalid)
     }
 }

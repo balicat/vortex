@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
 use vortex_array::ArrayView;
+use vortex_array::ExecutionCtx;
 use vortex_array::IntoArray;
 use vortex_array::validity::Validity;
 use vortex_array::vtable::ValidityVTable;
@@ -13,7 +14,7 @@ use crate::delta::array::DeltaArrayExt;
 use crate::delta::array::DeltaArraySlotsExt;
 
 impl ValidityVTable<Delta> for Delta {
-    fn validity(array: ArrayView<'_, Delta>) -> VortexResult<Validity> {
+    fn validity(array: ArrayView<'_, Delta>, _ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
         let start = array.offset();
         let stop = start + array.len();
         let validity = match array.deltas().validity()? {

@@ -182,6 +182,7 @@ impl VTable for Normalized {
         dtype: &DType,
         len: usize,
         slots: &[Option<ArrayRef>],
+        _ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         let slots = NormalizedSlotsView::from_slots(slots);
 
@@ -266,7 +267,10 @@ impl VTable for Normalized {
 }
 
 impl ValidityVTable<Normalized> for Normalized {
-    fn validity(array: ArrayView<'_, Normalized>) -> VortexResult<Validity> {
+    fn validity(
+        array: ArrayView<'_, Normalized>,
+        _ctx: &mut ExecutionCtx,
+    ) -> VortexResult<Validity> {
         array
             .normalized()
             .validity()?

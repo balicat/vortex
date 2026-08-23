@@ -3,6 +3,7 @@
 
 use vortex_error::VortexResult;
 
+use crate::ExecutionCtx;
 use crate::array::ArrayView;
 use crate::array::ValidityVTable;
 use crate::arrays::primitive::PrimitiveArrayExt;
@@ -10,7 +11,10 @@ use crate::arrays::primitive::vtable::Primitive;
 use crate::validity::Validity;
 
 impl ValidityVTable<Primitive> for Primitive {
-    fn validity(array: ArrayView<'_, Primitive>) -> VortexResult<Validity> {
+    fn validity(
+        array: ArrayView<'_, Primitive>,
+        _ctx: &mut ExecutionCtx,
+    ) -> VortexResult<Validity> {
         Ok(PrimitiveArrayExt::validity(&array))
     }
 }

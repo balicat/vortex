@@ -72,6 +72,7 @@ impl VTable for ByteBool {
         dtype: &DType,
         len: usize,
         slots: &[Option<ArrayRef>],
+        _ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         let validity =
             child_to_validity(slots[ByteBoolSlots::VALIDITY].as_ref(), dtype.nullability());
@@ -306,7 +307,7 @@ impl ByteBoolData {
 }
 
 impl ValidityVTable<ByteBool> for ByteBool {
-    fn validity(array: ArrayView<'_, ByteBool>) -> VortexResult<Validity> {
+    fn validity(array: ArrayView<'_, ByteBool>, _ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
         Ok(array.bytebool_validity())
     }
 }

@@ -153,6 +153,7 @@ impl VTable for Zstd {
         dtype: &DType,
         len: usize,
         slots: &[Option<ArrayRef>],
+        _ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         let validity = child_to_validity(slots[ZstdSlots::VALIDITY].as_ref(), dtype.nullability());
         data.validate(dtype, len, &validity)
@@ -1579,7 +1580,7 @@ impl ZstdData {
 }
 
 impl ValidityVTable<Zstd> for Zstd {
-    fn validity(array: ArrayView<'_, Zstd>) -> VortexResult<Validity> {
+    fn validity(array: ArrayView<'_, Zstd>, _ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
         let unsliced_validity = child_to_validity(
             array.slots()[ZstdSlots::VALIDITY].as_ref(),
             array.dtype().nullability(),

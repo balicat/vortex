@@ -4,6 +4,7 @@
 use itertools::Itertools;
 use vortex_error::VortexResult;
 
+use crate::ExecutionCtx;
 use crate::array::ArrayView;
 use crate::array::ValidityVTable;
 use crate::arrays::Chunked;
@@ -11,7 +12,7 @@ use crate::arrays::chunked::ChunkedArrayExt;
 use crate::validity::Validity;
 
 impl ValidityVTable<Chunked> for Chunked {
-    fn validity(array: ArrayView<'_, Chunked>) -> VortexResult<Validity> {
+    fn validity(array: ArrayView<'_, Chunked>, _ctx: &mut ExecutionCtx) -> VortexResult<Validity> {
         let validities = array
             .chunks()
             .iter()

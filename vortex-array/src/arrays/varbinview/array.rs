@@ -16,24 +16,26 @@ use vortex_error::vortex_bail;
 use vortex_error::vortex_ensure;
 use vortex_error::vortex_err;
 use vortex_error::vortex_panic;
+use vortex_mask::Mask;
 
 use crate::ArrayRef;
 use crate::ArraySlots;
-use crate::VortexSessionExecute;
+use crate::ExecutionCtx;
 use crate::array::Array;
 use crate::array::ArrayParts;
 use crate::array::TypedArrayRef;
 use crate::array::child_to_validity;
 use crate::array::validity_to_child;
 use crate::array_slots;
+use crate::arrays::Bool;
 use crate::arrays::VarBinView;
+use crate::arrays::bool::BoolArrayExt;
 use crate::arrays::varbinview::BinaryView;
 use crate::buffer::BufferHandle;
 use crate::builders::ArrayBuilder;
 use crate::builders::VarBinViewBuilder;
 use crate::dtype::DType;
 use crate::dtype::Nullability;
-use crate::legacy_session;
 use crate::validity::Validity;
 
 #[array_slots(VarBinView)]
@@ -181,7 +183,7 @@ impl VarBinViewData {
         dtype: DType,
         validity: Validity,
     ) -> VortexResult<Self> {
-        Self::validate(&views, &buffers, &dtype, &validity)?;
+        Self::validate(&views, &buffers, &dtype, &validity, None)?;
 
         // SAFETY: validate ensures all invariants are met.
         Ok(unsafe { Self::new_unchecked(views, buffers, dtype, validity) })
@@ -256,7 +258,7 @@ impl VarBinViewData {
         validity: Validity,
     ) -> Self {
         #[cfg(debug_assertions)]
-        Self::validate(&views, &buffers, &dtype, &validity)
+        Self::validate(&views, &buffers, &dtype, &validity, None)
             .vortex_expect("[Debug Assertion]: Invalid `VarBinViewArray` parameters");
 
         let handles: Vec<BufferHandle> = buffers
@@ -289,11 +291,15 @@ impl VarBinViewData {
     /// Validates the components that would be used to create a `VarBinViewArray`.
     ///
     /// This function checks all the invariants required by `VarBinViewArray::new_unchecked`.
+    /// With `ctx`, array-backed validity is fully validated (see
+    /// [`VTable::validate`](crate::vtable::VTable::validate) for the contract); without one, the
+    /// per-view checks run only when the validity child is already decoded.
     pub fn validate(
         views: &Buffer<BinaryView>,
         buffers: &Arc<[ByteBuffer]>,
         dtype: &DType,
         validity: &Validity,
+        ctx: Option<&mut ExecutionCtx>,
     ) -> VortexResult<()> {
         vortex_ensure!(
             validity.nullability() == dtype.nullability(),
@@ -303,21 +309,21 @@ impl VarBinViewData {
         );
 
         match dtype {
-            DType::Utf8(_) => Self::validate_views(views, buffers, validity, |string| {
+            DType::Utf8(_) => Self::validate_views(views, buffers, validity, ctx, |string| {
                 simdutf8::basic::from_utf8(string).is_ok()
             })?,
-            DType::Binary(_) => Self::validate_views(views, buffers, validity, |_| true)?,
+            DType::Binary(_) => Self::validate_views(views, buffers, validity, ctx, |_| true)?,
             _ => vortex_bail!(InvalidArgument: "invalid DType {dtype} for `VarBinViewArray`"),
         }
 
         Ok(())
     }
 
-    #[allow(clippy::disallowed_methods)]
     fn validate_views<F>(
         views: &Buffer<BinaryView>,
         buffers: &Arc<[ByteBuffer]>,
         validity: &Validity,
+        ctx: Option<&mut ExecutionCtx>,
         validator: F,
     ) -> VortexResult<()>
     where
@@ -374,13 +380,20 @@ impl VarBinViewData {
             // Array-backed validity is the only variant that needs an execution context: execute it
             // into a mask once and zip it with the views, validating only the valid (non-null)
             // entries.
-            Validity::Array(_) => {
-                // TODO(ctx): trait fixes - VTable::validate has a fixed signature.
-                let mut ctx = legacy_session().create_execution_ctx();
-                let mask = validity.execute_mask(views.len(), &mut ctx)?;
-                for ((idx, view), valid) in views.iter().enumerate().zip(mask.iter()) {
-                    if valid {
-                        validate_view(idx, view)?;
+            Validity::Array(validity_array) => {
+                let mask = match ctx {
+                    Some(ctx) => Some(validity.execute_mask(views.len(), ctx)?),
+                    // Without an execution context, encoded validity cannot be decoded; validate
+                    // the views only when the validity child is already a decoded bool array.
+                    None => validity_array
+                        .as_opt::<Bool>()
+                        .map(|bool_array| Mask::from(bool_array.to_bit_buffer())),
+                };
+                if let Some(mask) = mask {
+                    for ((idx, view), valid) in views.iter().enumerate().zip(mask.iter()) {
+                        if valid {
+                            validate_view(idx, view)?;
+                        }
                     }
                 }
             }
